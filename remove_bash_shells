@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# how to use:
+# ./remove_bash_shells [ip to not remove]
+
+if [[ $(/usr/bin/id -u) -ne 0 ]]; then
+    echo "Not running as root"
+    exit
+fi
+
+if [ $# -eq 0 ]
+  then
+    echo "No ip supplied, killing all non local bash shells"
+fi
+
+# foramt given ip to compare with lsof ouput
+
+ARR_IP=($(echo $1 | sed -r 's/\./ /g'))
+
+REV_IP=$(printf '%s\n' "${ARR_IP[@]}" | tac | tr '\n' ' '; echo)
+
+FORMATED=$( IFS=$'\n'; echo "${REV_IP[*]}" )
+
+FORMATED=$(echo $FORMATED | sed -r 's/ /-/g') 
+
+# create output to then filter to get to and from ips
+LIST=($(lsof -i | awk '($1 == "sshd" && $9 != "*:ssh") || $1 == "bash" || $1 == "nc"  {print $2, $9}'))
+
+# create empty array
+TOKILL=()
+
+# loop through list of ouput
+for (( i=0 ; i< ${#LIST[@]}; i++))
+do
+	# check if pid or ips
+	if ! [[ ${LIST[$i]} =~ ^[0-9]{1,4} ]]; 
+	then
+		# split the ips from the string
+		TOFROM=($(echo ${LIST[$i]} | grep -oP '[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}'))
+		
+		# check if the ip matches the given one, if it dose, skip it
+		if ! [[ ${TOFROM[1]} == $FORMATED ]]
+		then
+			#append item to kill list
+			VAL=$(($i-1))
+			K=${LIST[$VAL]}
+			TOKILL=(${TOKILL[@]} $K)
+		fi
+	fi
+done
+
+MESSAGE_1='removing '
+MESSAGE_2=' unknown shells'
+MESSAGE="$MESSAGE_1 ${#TOKILL[@]} $MESSAGE_2"
+echo $MESSAGE
+
+# kill items in kill list
+for i in "${TOKILL[@]}"
+do
+	kill $i
+done
+
